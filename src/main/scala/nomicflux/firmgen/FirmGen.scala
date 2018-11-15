@@ -1,0 +1,4 @@
+package FirmGen
+
+object FirmGen {
+}
