@@ -17,3 +17,6 @@ project/target
 .scala_dependencies
 .worksheet
 .idea
+*.swp
+.#*
+*~
