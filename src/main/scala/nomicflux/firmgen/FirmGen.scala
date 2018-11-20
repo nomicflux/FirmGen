@@ -1,6 +1,8 @@
-package FirmGen
+package firmgen
 
-import nomicflux.firmgen.markov._
+import scala.io.Source
+
+import markov._
 
 object FirmGen {
   import MarkovChain._
@@ -9,5 +11,5 @@ object FirmGen {
 
   def mkWeight(n: Int, skip: Int, weight: Double): WChainSpec = WChainSpec(n, skip, weight)
 
-  def mkMarkov(weights: WChainSpec, filename: filename): MarkovChain = MarkovChain.empty(weights).generateFromDocs(names(filename))
+  def mkMarkov(weights: Seq[WChainSpec], filename: String): MarkovChain = MarkovChain.empty(weights).generateFromDocs(names(filename))
 }
