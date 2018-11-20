@@ -4,7 +4,8 @@ import scala.annotation.tailrec
 import scala.util.Random
 
 object MarkovChain {
-  type MarkovMatrix = Map[NGram, Vector[(Option[Char], Double)]]
+  type MarkovMatrix = Map[NGram, Map[Option[Char], Double]]
+
   private def takeNGramWithFollowing(n: Int)(string: String): (NGram, Option[Char]) = {
     val (ngram, next) = string.splitAt(n)
     (NGram.fromString(n, ngram), next.headOption)
@@ -14,21 +15,21 @@ object MarkovChain {
     string.tails.map(takeNGramWithFollowing(n)).toVector
 
   private def toMarkovMatrix(ngrams: Vector[(NGram, Option[Char])]): MarkovMatrix =
-    ngrams.groupBy(_._1).mapValues(_.groupBy(_._2).mapValues(_.size.toDouble).toVector)
+    ngrams.groupBy(_._1).mapValues(_.groupBy(_._2).mapValues(_.size.toDouble))
 
-  private def normalizeRow(row: Vector[(Option[Char], Double)]): Vector[(Option[Char], Double)] = {
-    val cts = row.map(_._2).sum
-    row.map( item => item.copy(_2 = item._2 / cts) )
+  def normalizeRow(row: Map[Option[Char], Double]): Map[Option[Char], Double] = {
+    val cts = row.values.sum
+    row.mapValues( _ / cts )
   }
 
-  private def cumulateRow(row: Vector[(Option[Char], Double)]): Vector[(Option[Char], Double)] = {
-    row.foldLeft((Vector.empty[(Option[Char], Double)], 0.0)) { case ((acc, prob), (next, newProb)) =>
-      val cumulative = prob + newProb
-      (acc :+ (next, cumulative), cumulative)
+  def cumulateRow(row: Map[Option[Char], Double]): Vector[(Option[Char], Double)] = {
+    row.toVector.foldLeft((Vector.empty, 0.0d)) { case ((acc, prob), (k, v)) =>
+      val newProb = prob + v
+      (acc :+ (k, newProb), newProb)
     }._1
   }
 
-  private def normalizeMatrix(matrix: MarkovMatrix): MarkovMatrix = matrix.mapValues(row => cumulateRow(normalizeRow(row)))
+  private def normalizeMatrix(matrix: MarkovMatrix): MarkovMatrix = matrix.mapValues(row => normalizeRow(row))
 
   def apply(chainSize: Int, docs: Vector[String]): MarkovChain = {
     val matrix = toMarkovMatrix(docs.flatMap(takeAllNGramsWithFollowing(chainSize)))
@@ -37,21 +38,14 @@ object MarkovChain {
 }
 
 case class MarkovChain(chainSize: Int, probs: MarkovChain.MarkovMatrix) {
-  private def splitOption[A](vec: Vector[A]): Option[(A, Vector[A])] = 
+  private def splitOption[A](vec: Vector[A]): Option[(A, Vector[A])] =
     if (vec.isEmpty) None else Some((vec.head, vec.tail))
 
+  def getRow(string: String): Map[Option[Char], Double] = probs.getOrElse(NGram.fromString(chainSize, string), Map.empty)
+
   def nextChar(string: String): (Option[Char], Double) = {
-    val ngram = NGram.fromString(chainSize, string)
-    val prob = Random.nextDouble()   
-
-    @tailrec
-    def nextCharHelper(remainder: Vector[(Option[Char], Double)], prevProb: Double): (Option[Char], Double) =
-      splitOption(remainder) match {
-        case None => (None, prevProb)
-        case Some(((head, currProb), rest)) if currProb < prob => nextCharHelper(rest, currProb)
-        case Some(((head, currProb), rest)) => (head, currProb - prevProb)
-      }
-
-    nextCharHelper(probs.getOrElse(ngram, Vector.empty), 0.0)
+    val prob = Random.nextDouble()
+    val row = MarkovChain.cumulateRow(getRow(string))
+    row.dropWhile(_._2 < prob).headOption.map(_._1)
   }
 }
