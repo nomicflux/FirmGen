@@ -13,8 +13,10 @@ object MarkovChain {
     (NGram.fromString(n, skip, ngram), next.headOption)
   }
 
+  private def cleanBlanks(string: String): String = string.replaceAll(" +", " ")
+
   private def takeAllNGramsWithFollowing(n: Int, skip: Int)(string: String): Vector[(NGram, Option[Char])] =
-    string.tails.take(string.length - n*skip + 1).map(takeNGramWithFollowing(n, skip)(_)).toVector
+    (" " * (n * skip) + string).tails.take(string.length + n*skip).map(ngram ⇒ takeNGramWithFollowing(n, skip)(cleanBlanks(ngram))).toVector
 
   private def toMarkovMatrix(ngrams: Vector[(NGram, Option[Char])]): MarkovMatrix =
     ngrams.groupBy(_._1).mapValues(_.groupBy(_._2).mapValues(_.size.toDouble))
@@ -48,6 +50,15 @@ object MarkovChain {
 sealed trait MarkovChain {
   def generateFromDocs(docs: Vector[String]): MarkovChain
   def nextChar(string: String): (Option[Char], Double)
+  def generateWord: String = {
+    @tailrec
+    def generateWordHelper(currWord: String): String = nextChar(currWord) match {
+      case (None, _) ⇒ currWord
+      case (Some(char), _) ⇒ generateWordHelper(currWord + char)
+    }
+
+    generateWordHelper(" ").trim
+  }
 }
 
 case class SingleMarkovChain(chainSize: Int, skip: Int, probs: MarkovChain.MarkovMatrix) extends MarkovChain {
@@ -60,7 +71,7 @@ case class SingleMarkovChain(chainSize: Int, skip: Int, probs: MarkovChain.Marko
 
   def nextChar(string: String): (Option[Char], Double) = {
     val prob = Random.nextDouble()
-    val row = MarkovChain.cumulateRow(getRow(string))
+    val row = MarkovChain.cumulateRow(getRow(string.toLowerCase.takeRight(chainSize)))
     val next: Option[(Option[Char], Double)] = row.dropWhile(_._3 < prob).headOption.map(kv ⇒ (kv._1, kv._2))
     next.getOrElse((None, 0.0d))
   }
