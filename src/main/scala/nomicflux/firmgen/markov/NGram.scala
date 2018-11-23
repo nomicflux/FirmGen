@@ -5,4 +5,6 @@ object NGram {
     NGram(n, skip, string.grouped(skip).map(_.head).take(n).mkString)
 }
 
-case class NGram(n: Int, skip: Int, value: String)
+case class NGram(n: Int, skip: Int, value: String) {
+  def map(f: String => String): NGram = this.copy(value = f(value))
+}

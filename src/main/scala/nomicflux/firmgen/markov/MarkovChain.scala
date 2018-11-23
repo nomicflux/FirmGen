@@ -5,6 +5,7 @@ import scala.util.Random
 
 object MarkovChain {
   type MarkovMatrix = Map[NGram, Map[Option[Char], Double]]
+  case class ProbWithCumulation(probHere: Double, probCumulative: Double)
 
   case class WChainSpec(n: Int, skip: Int, weight: Double)
 
@@ -16,22 +17,21 @@ object MarkovChain {
   private def cleanBlanks(string: String): String = string.replaceAll(" +", " ")
 
   private def takeAllNGramsWithFollowing(n: Int, skip: Int)(string: String): Vector[(NGram, Option[Char])] =
-    (" " * (n * skip) + string).tails.take(string.length + n*skip).map(ngram ⇒ takeNGramWithFollowing(n, skip)(cleanBlanks(ngram))).toVector
+    (" " * ((n - 1) * skip + 1) + string).tails.take(string.length + 1).map(ngram ⇒ takeNGramWithFollowing(n, skip)(ngram)).map{ case (ngram, next) => (ngram.map(cleanBlanks), next) }.toVector
 
   private def toMarkovMatrix(ngrams: Vector[(NGram, Option[Char])]): MarkovMatrix =
     ngrams.groupBy(_._1).mapValues(_.groupBy(_._2).mapValues(_.size.toDouble))
 
-  def normalizeRow(row: Map[Option[Char], Double]): Map[Option[Char], Double] =
-    if (row.isEmpty) row
-    else {
-      val cts = row.values.sum
-      row.mapValues( _ / cts )
-    }
+  def normalizeRow(row: Map[Option[Char], Double]): Map[Option[Char], Double] = {
+    val cts = row.values.sum
+    if (cts == 0.0) row
+    else row.mapValues( _ / cts )
+  }
 
-  def cumulateRow(row: Map[Option[Char], Double]): Vector[(Option[Char], Double, Double)] = {
-    row.toVector.foldLeft((Vector.empty[(Option[Char], Double, Double)], 0.0d)) { case ((acc, prob), (k, v)) =>
+  def cumulateRow(row: Map[Option[Char], Double]): Vector[(Option[Char], ProbWithCumulation)] = {
+    row.toVector.foldLeft((Vector.empty[(Option[Char], ProbWithCumulation)], 0.0d)) { case ((acc, prob), (k, v)) =>
       val newProb = prob + v
-      (acc :+ (k, v, newProb), newProb)
+      (acc :+ (k, ProbWithCumulation(v, newProb)), newProb)
     }._1
   }
 
@@ -49,12 +49,13 @@ object MarkovChain {
 
 sealed trait MarkovChain {
   def generateFromDocs(docs: Vector[String]): MarkovChain
-  def nextChar(string: String): (Option[Char], Double)
+  def nextChar(string: String): Option[(Option[Char], Double)]
   def generateWord: String = {
     @tailrec
     def generateWordHelper(currWord: String): String = nextChar(currWord) match {
-      case (None, _) ⇒ currWord
-      case (Some(char), _) ⇒ generateWordHelper(currWord + char)
+      case None => currWord
+      case Some((None, _)) ⇒ currWord
+      case Some((Some(char), _)) ⇒ generateWordHelper(currWord + char)
     }
 
     generateWordHelper(" ").trim
@@ -69,11 +70,10 @@ case class SingleMarkovChain(chainSize: Int, skip: Int, probs: MarkovChain.Marko
 
   def getRow(string: String): Map[Option[Char], Double] = probs.getOrElse(NGram.fromString(chainSize, skip, string), Map.empty)
 
-  def nextChar(string: String): (Option[Char], Double) = {
+  def nextChar(string: String): Option[(Option[Char], Double)] = {
     val prob = Random.nextDouble()
     val row = MarkovChain.cumulateRow(getRow(string.toLowerCase.takeRight(chainSize)))
-    val next: Option[(Option[Char], Double)] = row.dropWhile(_._3 < prob).headOption.map(kv ⇒ (kv._1, kv._2))
-    next.getOrElse((None, 0.0d))
+    row.dropWhile(_._2.probCumulative < prob).headOption.map(kv ⇒ (kv._1, kv._2.probHere))
   }
 }
 
@@ -86,16 +86,15 @@ case class MarkovChains(wchains: Seq[WeightedChain]) extends MarkovChain {
     MarkovChains(wchains.map(wchain ⇒ wchain.map(_.generateFromDocs(docs))))
   }
 
-  def nextChar(string: String): (Option[Char], Double) = {
+  def nextChar(string: String): Option[(Option[Char], Double)] = {
     val charsWithProbs: Seq[(Option[Char], Double)] =
-      wchains.map( wchain => {
-                    val (char, prob) = wchain.chain.nextChar(string)
-                    (char, prob * wchain.weight)
+      wchains.flatMap( wchain => {
+                    wchain.chain.nextChar(string).map { case (char, prob) => (char, prob * wchain.weight) }
                   }
       )
-    val normalizedRow: Vector[(Option[Char], Double, Double)] = MarkovChain.cumulateRow(MarkovChain.normalizeRow(charsWithProbs.toMap))
+    val normalizedRow = MarkovChain.normalizeRow(charsWithProbs.toMap)
+    val cumulatedRow: Vector[(Option[Char], MarkovChain.ProbWithCumulation)] = MarkovChain.cumulateRow(normalizedRow)
     val rand = Random.nextDouble()
-    val next: Option[(Option[Char], Double)] = normalizedRow.dropWhile( _._3 < rand ).headOption.map(kv ⇒ (kv._1, kv._2))
-    next.getOrElse((None, 0.0d))
+    cumulatedRow.dropWhile( _._2.probCumulative < rand ).headOption.map(kv ⇒ (kv._1, kv._2.probHere))
   }
 }
