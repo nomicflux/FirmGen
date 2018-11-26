@@ -72,7 +72,7 @@ case class SingleMarkovChain(chainSize: Int, skip: Int, probs: MarkovChain.Marko
 
   def nextChar(string: String): Option[(Option[Char], Double)] = {
     val prob = Random.nextDouble()
-    val row = MarkovChain.cumulateRow(getRow(string.toLowerCase.takeRight(chainSize)))
+    val row = MarkovChain.cumulateRow(getRow(string.toLowerCase.takeRight(chainSize * skip)))
     row.dropWhile(_._2.probCumulative < prob).headOption.map(kv ⇒ (kv._1, kv._2.probHere))
   }
 }
